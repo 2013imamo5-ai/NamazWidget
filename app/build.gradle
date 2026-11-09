@@ -1,5 +1,7 @@
 plugins { id 'com.android.application' }
 
+def signingPassword = System.getenv('NAMAZ_SIGNING_PASSPHRASE') ?: ''
+
 android {
     namespace 'com.namazwidget.app'
     compileSdk 35
@@ -9,5 +11,21 @@ android {
         targetSdk 35
         versionCode 2
         versionName '1.1.0'
+    }
+    signingConfigs {
+        if (signingPassword) {
+            release {
+                storeFile file('../signing/namaz-release.p12')
+                storePassword signingPassword
+                keyAlias 'namaz'
+                keyPassword signingPassword
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (signingPassword) signingConfig signingConfigs.release
+        }
     }
 }
