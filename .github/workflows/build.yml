@@ -4,7 +4,9 @@ on:
     branches: [main]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
+env:
+  NAMAZ_SIGNING_PASSPHRASE: ${{ secrets.NAMAZ_SIGNING_PASSPHRASE }}
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,17 +18,52 @@ jobs:
           java-version: '17'
       - name: Use preinstalled Android SDK
         run: |
-          echo "ANDROID_HOME=${ANDROID_HOME}"
-          ls "${ANDROID_HOME}/platforms" || true
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          ls "${ANDROID_HOME}/platforms"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
-      - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
-      - name: Upload APK
-        if: success()
+      - name: Decrypt permanent signing key
+        if: env.NAMAZ_SIGNING_PASSPHRASE != ''
+        run: |
+          base64 -d signing/namaz-release.p12.enc.b64 | openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:NAMAZ_SIGNING_PASSPHRASE -out signing/namaz-release.p12
+      - name: Build release and debug APK
+        run: gradle --no-daemon assembleRelease assembleDebug
+      - name: Upload unsigned APK for one-time local signing
+        if: env.NAMAZ_SIGNING_PASSPHRASE == ''
         uses: actions/upload-artifact@v4
         with:
-          name: NamazWidget-debug-apk
+          name: NamazWidget-unsigned-release
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
+      - name: Package Android APK signing tools
+        if: env.NAMAZ_SIGNING_PASSPHRASE == ''
+        run: |
+          mkdir -p signing-tools/lib
+          cp "${ANDROID_HOME}/build-tools/35.0.0/apksigner" signing-tools/
+          cp "${ANDROID_HOME}/build-tools/35.0.0/zipalign" signing-tools/
+          cp "${ANDROID_HOME}/build-tools/35.0.0/lib/apksigner.jar" signing-tools/lib/
+      - name: Upload signing tools
+        if: env.NAMAZ_SIGNING_PASSPHRASE == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: signing-tools
+          path: signing-tools/
+      - name: Upload debug test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NamazWidget-debug-test-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Verify signed release APK
+        if: env.NAMAZ_SIGNING_PASSPHRASE != ''
+        run: |
+          "${ANDROID_HOME}/build-tools/35.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk
+          cp app/build/outputs/apk/release/app-release.apk NamazWidget.apk
+      - name: Publish direct-APK GitHub release
+        if: env.NAMAZ_SIGNING_PASSPHRASE != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.1.0
+          name: NamazWidget 1.1.0 — Обратный отсчёт
+          generate_release_notes: true
+          make_latest: true
+          files: NamazWidget.apk
