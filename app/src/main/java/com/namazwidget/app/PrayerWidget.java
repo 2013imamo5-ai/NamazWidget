@@ -54,7 +54,9 @@ public class PrayerWidget extends AppWidgetProvider {
         } else if(Intent.ACTION_DATE_CHANGED.equals(action)
                 || Intent.ACTION_TIME_CHANGED.equals(action)
                 || Intent.ACTION_TIMEZONE_CHANGED.equals(action)
-                || Intent.ACTION_BOOT_COMPLETED.equals(action)) {
+                || Intent.ACTION_BOOT_COMPLETED.equals(action)
+                || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)
+                || AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED.equals(action)) {
             refreshEveryWidget(c);
         }
     }
@@ -134,17 +136,36 @@ public class PrayerWidget extends AppWidgetProvider {
         return null;
     }
 
+    /**
+     * Refresh at the next prayer AND at local midnight, whichever is earlier.
+     * Inexact alarms may slip for 20+ min on Android 14+/HyperOS in Doze.
+     * Exact-alarm access is requested explicitly via the app settings screen.
+     */
     private static void scheduleBoundaryAlarm(Context c,Upcoming next) {
-        if(next==null)return;
         AlarmManager alarm=(AlarmManager)c.getSystemService(Context.ALARM_SERVICE);
         if(alarm==null)return;
+        Calendar midnight=Calendar.getInstance();
+        midnight.add(Calendar.DAY_OF_MONTH,1);
+        midnight.set(Calendar.HOUR_OF_DAY,0);
+        midnight.set(Calendar.MINUTE,0);
+        midnight.set(Calendar.SECOND,1);
+        midnight.set(Calendar.MILLISECOND,0);
+        long when=midnight.getTimeInMillis();
+        if(next!=null)when=Math.min(when,next.when+1000L);
+
         Intent intent=new Intent(c,Strip.class).setAction(BOUNDARY);
         PendingIntent pi=PendingIntent.getBroadcast(c,81,intent,
                 PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        long when=next.when+1000L;
-        // No exact-alarm permission required. Android may postpone this alarm in Doze;
-        // the Chronometer continues ticking while visible.
-        alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,when,pi);
+        try {
+            if(Build.VERSION.SDK_INT<Build.VERSION_CODES.S || alarm.canScheduleExactAlarms()) {
+                alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,when,pi);
+            } else {
+                // Safe fallback until the user grants Alarms & reminders access.
+                alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,when,pi);
+            }
+        } catch(SecurityException ignored) {
+            alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,when,pi);
+        }
     }
 
     private static Paint paint(int color) {
