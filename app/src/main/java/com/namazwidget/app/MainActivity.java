@@ -1,9 +1,16 @@
 package com.namazwidget.app;
 
 import android.app.Activity;
+import android.app.AlarmManager;
 import android.appwidget.AppWidgetManager;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.Settings;
+import android.view.View;
+import android.widget.Button;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.widget.CheckBox;
@@ -13,6 +20,8 @@ import android.widget.TextView;
 
 public class MainActivity extends Activity {
     private int green = Color.rgb(20,43,39);
+    private Button alarmPermissionButton;
+    private TextView alarmPermissionInfo;
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         LinearLayout root = new LinearLayout(this);
@@ -58,12 +67,49 @@ public class MainActivity extends Activity {
             getPreferences(MODE_PRIVATE).edit().putBoolean("haze",checked).apply(); refresh();
         });
         root.addView(haze);
+
+        alarmPermissionInfo=new TextView(this);
+        alarmPermissionInfo.setTextColor(Color.rgb(231,201,130));
+        alarmPermissionInfo.setTextSize(15);
+        alarmPermissionInfo.setPadding(0,35,0,12);
+        root.addView(alarmPermissionInfo);
+
+        alarmPermissionButton=new Button(this);
+        alarmPermissionButton.setText("Разрешить точное обновление");
+        alarmPermissionButton.setOnClickListener(button -> {
+            if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.S) {
+                Intent request=new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM);
+                request.setData(Uri.parse("package:"+getPackageName()));
+                try {
+                    startActivity(request);
+                } catch(Exception problem) {
+                    Intent settings=new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:"+getPackageName()));
+                    startActivity(settings);
+                }
+            }
+        });
+        root.addView(alarmPermissionButton);
+
         TextView note = new TextView(this);
-        note.setText("\nНастоящее размытие обоев зависит от лаунчера Android. Матовое стекло, цвет и прозрачность работают без специальных разрешений.\n\nВремя намаза берётся только из бумажного календаря. Неуказанные даты пока показывают прочерки, а не выдуманные значения.");
+        note.setText("\nТочное обновление нужно для мгновенной смены ближайшего намаза и сброса таймера в нужный момент. Без разрешения система может задерживать переключение при энергосбережении.\n\nВремя намаза берётся только из бумажного календаря.");
         note.setTextColor(Color.rgb(184,211,201));
         note.setTextSize(14);
         root.addView(note);
         setContentView(root);
+    }
+    @Override protected void onResume() {
+        super.onResume();
+        if(alarmPermissionInfo!=null && alarmPermissionButton!=null) {
+            AlarmManager alarm=(AlarmManager)getSystemService(Context.ALARM_SERVICE);
+            boolean allowed=Build.VERSION.SDK_INT<Build.VERSION_CODES.S ||
+                    (alarm!=null && alarm.canScheduleExactAlarms());
+            alarmPermissionInfo.setText(allowed
+                    ? "✓ Точное обновление времени включено"
+                    : "⚠ Включи точное обновление, чтобы таймер не уходил в минус");
+            alarmPermissionButton.setVisibility(allowed?View.GONE:View.VISIBLE);
+        }
+        refresh();
     }
     private void refresh() {
         AppWidgetManager wm=AppWidgetManager.getInstance(this);
